@@ -1,0 +1,41 @@
+server:
+  port: 8080
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: ${EUREKA_URI:http://localhost:8761/eureka}
+  instance:
+    preferIpAddress: true
+    hostname: localhost
+
+spring:
+  application:
+    name: ash-api-gateway
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+      routes:
+        - id: authModule
+          uri: lb://ash-auth-service
+          predicates:
+            - Path=/auth/**
+        - id: userModule
+          uri: lb://ash-user-service
+          predicates:
+            - Path=/user/**
+
+management:
+  endpoint:
+    shutdown:
+      enabled: true
+    info:
+      enabled: true
+    health:
+      enabled: true
+    beans:
+      enabled: true
