@@ -14,15 +14,28 @@ configurations {
     }
 }
 
-repositories {
-    mavenCentral()
-}
-
 ext {
     set('springCloudVersion', "2020.0.3")
 }
 
+repositories {
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/jakubspiewak-ash/ash-libs")
+            credentials {
+                username = System.getenv("GITHUB_USERNAME") ?: project.findProperty("GITHUB_USERNAME")
+                password = System.getenv("GITHUB_TOKEN") ?: project.findProperty("GITHUB_TOKEN")
+            }
+        }
+    }
+    mavenCentral()
+}
+
 dependencies {
+    // ash
+    implementation 'com.jakubspiewak:ash-api-model-lib:0.0.1.24-SNAPSHOT'
+
     // spring
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 //    implementation 'org.springframework.boot:spring-boot-starter-web'
