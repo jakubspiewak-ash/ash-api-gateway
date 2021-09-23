@@ -12,11 +12,13 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.util.Collections;
+import java.util.Optional;
 import java.util.function.Function;
 
-import static java.util.Objects.requireNonNull;
-import static org.springframework.http.HttpStatus.FORBIDDEN;
-import static org.springframework.http.HttpStatus.UNAUTHORIZED;
+import static java.util.Optional.ofNullable;
+import static java.util.function.Predicate.not;
+import static org.springframework.http.HttpStatus.*;
 
 @Component
 @RefreshScope
@@ -25,6 +27,7 @@ public class AuthenticationFilter implements GlobalFilter {
 
   private static final String AUTH_SERVICE_ENDPOINT = "lb://ash-auth-service/auth";
   private static final String AUTHORIZATION_HEADER_NAME = "Authorization";
+  private static final String ASH_USER_ID_HEADER_NAME = "ash-user-id";
 
   private final WebClient webClient;
   private final SecurePathValidator securePathValidator;
@@ -34,47 +37,50 @@ public class AuthenticationFilter implements GlobalFilter {
     final var request = exchange.getRequest();
 
     if (securePathValidator.isSecured(request)) {
-      if (!hasAuthorizationHeader(request)) {
+      final var token = getAuthorizationHeaderValue(request);
+
+      if (token.isEmpty()) {
         return onError(exchange, UNAUTHORIZED);
       }
 
-      final var token = getAuthorizationHeader(request);
-      return getApiTokenInfo(token).flatMap(handleToken(exchange, chain));
+      return getApiTokenInfo(token.get())
+          .filter(not(ApiTokenInfo::getIsExpired))
+          .map(populateUserIdHeader(exchange))
+          .flatMap(chain::filter)
+          .switchIfEmpty(onError(exchange, FORBIDDEN));
     }
     return chain.filter(exchange);
   }
 
-  private Function<ApiTokenInfo, Mono<? extends Void>> handleToken(
-      ServerWebExchange exchange, GatewayFilterChain chain) {
-    return tokenInfo -> {
-      if (tokenInfo.getIsExpired()) {
-        return onError(exchange, FORBIDDEN);
-      }
-      populateRequestWithHeaders(exchange, tokenInfo);
-      return chain.filter(exchange);
+  private Function<ApiTokenInfo, ServerWebExchange> populateUserIdHeader(
+      ServerWebExchange exchange) {
+    return info -> {
+      exchange
+          .getRequest()
+          .mutate()
+          .header(ASH_USER_ID_HEADER_NAME, info.getUserId().toString())
+          .build();
+      return exchange;
     };
   }
 
   private Mono<ApiTokenInfo> getApiTokenInfo(String token) {
     return webClient
         .get()
-        .uri(String.format("%s/%s", AUTH_SERVICE_ENDPOINT, token))
+        .uri(createGetTokenInfoEndpoint(token))
         .retrieve()
         .bodyToMono(ApiTokenInfo.class);
   }
 
-  private boolean hasAuthorizationHeader(ServerHttpRequest request) {
-    return request.getHeaders().containsKey(AUTHORIZATION_HEADER_NAME);
+  private String createGetTokenInfoEndpoint(String token) {
+    return String.format("%s/%s", AUTH_SERVICE_ENDPOINT, token);
   }
 
-  private String getAuthorizationHeader(ServerHttpRequest request) {
-    return requireNonNull(request.getHeaders().get(AUTHORIZATION_HEADER_NAME)).get(0);
-  }
-
-  private void populateRequestWithHeaders(ServerWebExchange exchange, ApiTokenInfo tokenInfo) {
-    final var userId = tokenInfo.getUserId();
-
-    exchange.getRequest().mutate().header("ash-user-id", String.valueOf(userId)).build();
+  private Optional<String> getAuthorizationHeaderValue(ServerHttpRequest request) {
+    return ofNullable(request.getHeaders().get(AUTHORIZATION_HEADER_NAME))
+        .orElseGet(Collections::emptyList)
+        .stream()
+        .findFirst();
   }
 
   private Mono<Void> onError(ServerWebExchange exchange, HttpStatus httpStatus) {
