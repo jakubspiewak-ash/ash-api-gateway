@@ -34,7 +34,7 @@ repositories {
 
 dependencies {
     // ash
-    implementation 'com.jakubspiewak:ash-api-model-lib:0.0.1.24-SNAPSHOT'
+    implementation 'com.jakubspiewak:ash-api-model-lib:0.0.1.25-SNAPSHOT'
 
     // spring
     implementation 'org.springframework.boot:spring-boot-starter-actuator'

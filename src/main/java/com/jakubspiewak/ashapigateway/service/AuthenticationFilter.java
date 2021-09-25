@@ -2,6 +2,7 @@ package com.jakubspiewak.ashapigateway.service;
 
 import com.jakubspiewak.ashapimodellib.model.auth.ApiTokenInfo;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.context.config.annotation.RefreshScope;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
@@ -12,14 +13,16 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.function.Function;
 
 import static java.util.Optional.ofNullable;
-import static java.util.function.Predicate.not;
-import static org.springframework.http.HttpStatus.*;
+import static org.springframework.http.HttpStatus.FORBIDDEN;
+import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
+@Slf4j
 @Component
 @RefreshScope
 @RequiredArgsConstructor
@@ -32,6 +35,10 @@ public class AuthenticationFilter implements GlobalFilter {
   private final WebClient webClient;
   private final SecurePathValidator securePathValidator;
 
+  private static ApiTokenInfo createNonAcceptedTokenInfo() {
+    return ApiTokenInfo.builder().isAccepted(false).build();
+  }
+
   @Override
   public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
     final var request = exchange.getRequest();
@@ -40,20 +47,20 @@ public class AuthenticationFilter implements GlobalFilter {
       final var token = getAuthorizationHeaderValue(request);
 
       if (token.isEmpty()) {
-        return onError(exchange, UNAUTHORIZED);
+        return onError(exchange, UNAUTHORIZED, "Authorization header is missing");
       }
 
       return getApiTokenInfo(token.get())
-          .filter(not(ApiTokenInfo::getIsExpired))
-          .map(populateUserIdHeader(exchange))
+          .filter(ApiTokenInfo::getIsAccepted)
+          .switchIfEmpty(Mono.error(new RuntimeException("Token is invalid")))
+          .map(populateHeader(exchange))
           .flatMap(chain::filter)
-          .switchIfEmpty(onError(exchange, FORBIDDEN));
+          .onErrorResume(throwable -> onError(exchange, FORBIDDEN, throwable.getMessage()));
     }
     return chain.filter(exchange);
   }
 
-  private Function<ApiTokenInfo, ServerWebExchange> populateUserIdHeader(
-      ServerWebExchange exchange) {
+  private Function<ApiTokenInfo, ServerWebExchange> populateHeader(ServerWebExchange exchange) {
     return info -> {
       exchange
           .getRequest()
@@ -69,7 +76,8 @@ public class AuthenticationFilter implements GlobalFilter {
         .get()
         .uri(createGetTokenInfoEndpoint(token))
         .retrieve()
-        .bodyToMono(ApiTokenInfo.class);
+        .bodyToMono(ApiTokenInfo.class)
+        .onErrorReturn(createNonAcceptedTokenInfo());
   }
 
   private String createGetTokenInfoEndpoint(String token) {
@@ -83,9 +91,13 @@ public class AuthenticationFilter implements GlobalFilter {
         .findFirst();
   }
 
-  private Mono<Void> onError(ServerWebExchange exchange, HttpStatus httpStatus) {
+  private Mono<Void> onError(ServerWebExchange exchange, HttpStatus httpStatus, String message) {
+    log.info("ONERROR " + httpStatus.toString());
     final var response = exchange.getResponse();
+    final var messageBytes = message.getBytes(StandardCharsets.UTF_8);
+    final var buffer = response.bufferFactory().wrap(messageBytes);
+
     response.setStatusCode(httpStatus);
-    return response.setComplete();
+    return response.writeWith(Mono.just(buffer));
   }
 }
