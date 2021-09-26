@@ -13,11 +13,11 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.function.Function;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Optional.ofNullable;
 import static org.springframework.http.HttpStatus.FORBIDDEN;
 import static org.springframework.http.HttpStatus.UNAUTHORIZED;
@@ -28,6 +28,10 @@ import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 @RequiredArgsConstructor
 public class AuthenticationFilter implements GlobalFilter {
 
+  // TODO: improvemnt:
+  // there should be a better option
+  // maybe make some kind of lib or util class in
+  // other repo
   private static final String AUTH_SERVICE_ENDPOINT = "lb://ash-auth-service/auth";
   private static final String AUTHORIZATION_HEADER_NAME = "Authorization";
   private static final String ASH_USER_ID_HEADER_NAME = "ash-user-id";
@@ -92,9 +96,8 @@ public class AuthenticationFilter implements GlobalFilter {
   }
 
   private Mono<Void> onError(ServerWebExchange exchange, HttpStatus httpStatus, String message) {
-    log.info("ONERROR " + httpStatus.toString());
     final var response = exchange.getResponse();
-    final var messageBytes = message.getBytes(StandardCharsets.UTF_8);
+    final var messageBytes = message.getBytes(UTF_8);
     final var buffer = response.bufferFactory().wrap(messageBytes);
 
     response.setStatusCode(httpStatus);
