@@ -28,6 +28,10 @@ spring:
           uri: lb://ash-user-service
           predicates:
             - Path=/user/**
+        - id: expenseModule
+          uri: lb://ash-expense-service
+          predicates:
+            - Path=/expense/**
 
 management:
   endpoint:
